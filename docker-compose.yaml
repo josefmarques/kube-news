@@ -1,0 +1,57 @@
+version: '3.8'
+
+services:
+  app:
+    build:
+      context: ./src
+      dockerfile: Dockerfile.dev
+    container_name: kube-news-app
+    ports:
+      - "3000:8080"
+    environment:
+      - NODE_ENV=development
+      - PORT=8080
+      - DB_HOST=postgres
+      - DB_DATABASE=kubedevnews
+      - DB_USERNAME=kubedevnews
+      - DB_PASSWORD=Pg#123
+    volumes:
+      - ./src:/app
+      - /app/node_modules
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    networks:
+      - kube-news-network
+
+  postgres:
+    image: postgres:15-alpine
+    container_name: kube-news-postgres
+    environment:
+      - POSTGRES_USER=kubedevnews
+      - POSTGRES_PASSWORD=Pg#123
+      - POSTGRES_DB=kubedevnews
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U kubedevnews -d kubedevnews"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - kube-news-network
+
+volumes:
+  postgres_data:
+
+networks:
+  kube-news-network:
+    driver: bridge

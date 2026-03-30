@@ -1,0 +1,27 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: kube-news-read
+  namespace: kube-news
+  labels:
+    app: kube-news
+rules:
+  - apiGroups: [""]
+    resources: ["configmaps", "services"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: kube-news-read-binding
+  namespace: kube-news
+  labels:
+    app: kube-news
+subjects:
+  - kind: ServiceAccount
+    name: kube-news
+    namespace: kube-news
+roleRef:
+  kind: Role
+  name: kube-news-read
+  apiGroup: rbac.authorization.k8s.io

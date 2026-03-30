@@ -1,76 +1,153 @@
 apiVersion: apps/v1
 kind: Deployment
-metadata: 
-  name: postgre
+metadata:
+  name: kube-news
+  namespace: kube-news
+  labels:
+    app: kube-news
+    version: v1
 spec:
+  replicas: 3
   selector:
     matchLabels:
-      app: postgre
+      app: kube-news
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
   template:
     metadata:
       labels:
-        app: postgre
+        app: kube-news
+        version: v1
     spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+        runAsGroup: 1001
+        fsGroup: 1001
+        seccompProfile:
+          type: RuntimeDefault
+      serviceAccountName: kube-news
       containers:
-        - name: postgre
-          image: postgres:13.1
+        - name: kube-news
+          image: fabricioveronez/kube-news:latest
+          imagePullPolicy: IfNotPresent
           ports:
-            - containerPort: 5432
+            - containerPort: 8080
+              name: http
           env:
-            - name: POSTGRES_PASSWORD
-              value: pg1234
-            - name: POSTGRES_USER
-              value: kubenews
-            - name: POSTGRES_DB
-              value: kubenews
+            - name: NODE_ENV
+              value: "production"
+            - name: PORT
+              value: "8080"
+            - name: DB_DATABASE
+              valueFrom:
+                configMapKeyRef:
+                  name: db-config
+                  key: database
+            - name: DB_HOST
+              valueFrom:
+                secretKeyRef:
+                  name: db-credentials
+                  key: host
+            - name: DB_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: db-credentials
+                  key: username
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: db-credentials
+                  key: password
+          resources:
+            requests:
+              memory: "64Mi"
+              cpu: "50m"
+            limits:
+              memory: "256Mi"
+              cpu: "200m"
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          startupProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            failureThreshold: 30
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            - name: cache
+              mountPath: /app/cache
+      volumes:
+        - name: tmp
+          emptyDir: {}
+        - name: cache
+          emptyDir: {}
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: topology.kubernetes.io/zone
+          whenUnsatisfiable: DoNotSchedule
+          labelSelector:
+            matchLabels:
+              app: kube-news
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app: kube-news
 ---
 apiVersion: v1
 kind: Service
 metadata:
-  name: postgre
+  name: kube-news-service
+  namespace: kube-news
+  labels:
+    app: kube-news
 spec:
   selector:
-    app: postgre
+    app: kube-news
   ports:
-    - port: 5432
+    - port: 80
+      targetPort: 8080
+      protocol: TCP
+      name: http
+  type: ClusterIP
 ---
-apiVersion: apps/v1
-kind: Deployment
+apiVersion: policy/v1
+kind: PodDisruptionBudget
 metadata:
-  name: kubenews
+  name: kube-news-pdb
+  namespace: kube-news
+  labels:
+    app: kube-news
 spec:
-  replicas: 10
+  minAvailable: 2
   selector:
     matchLabels:
-      app: kubenews
-  template:
-    metadata:
-      labels:
-        app: kubenews
-    spec:
-      containers:
-      - name: kubenews
-        image: fabricioveronez/kube-news:v2
-        ports:
-        - containerPort: 8080
-        env:
-        - name: DB_DATABASE
-          value: kubenews
-        - name: DB_PASSWORD
-          value: pg1234
-        - name: DB_USERNAME
-          value: kubenews
-        - name: DB_HOST
-          value: postgre
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: kubenews
-spec:
-  selector:
-    app: kubenews
-  ports:
-  - port: 80
-    targetPort: 8080
-  type: LoadBalancer
+      app: kube-news
